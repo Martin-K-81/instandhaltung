@@ -1,0 +1,2003 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Instandhaltung — Auftragsliste</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+<!-- Firebase (compat SDK, funktioniert direkt aus einer lokalen HTML-Datei ohne Build-Prozess) -->
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore-compat.js"></script>
+
+<style>
+  :root {
+    --bg: #14171a;
+    --panel: #1c2024;
+    --panel-2: #22262b;
+    --border: #2c3238;
+    --text: #ece8e0;
+    --muted: #8b9096;
+    --amber: #e8a33d;
+    --teal: #4f9d95;
+    --rust: #c9634f;
+    --green: #6ea45e;
+    --radius: 3px;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'IBM Plex Sans', sans-serif;
+    font-size: 15px;
+    line-height: 1.5;
+  }
+
+  h1, h2, h3 { font-family: 'Space Grotesk', sans-serif; margin: 0; }
+
+  .mono { font-family: 'IBM Plex Mono', monospace; }
+
+  /* ---------- Layout ---------- */
+  .app { display: flex; min-height: 100vh; }
+
+  .rail {
+    width: 56px;
+    flex-shrink: 0;
+    background: var(--panel);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 20px 0;
+  }
+  .rail .mark {
+    writing-mode: vertical-rl;
+    font-family: 'Space Grotesk', sans-serif;
+    font-weight: 700;
+    font-size: 15px;
+    letter-spacing: 0.08em;
+    color: var(--amber);
+  }
+  .info-btn {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    color: var(--muted);
+    font-size: 13px;
+    font-weight: 700;
+    font-family: 'IBM Plex Sans', sans-serif;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 16px;
+    flex-shrink: 0;
+  }
+  .info-btn:hover { border-color: var(--teal); color: var(--teal); }
+
+  .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+
+  .topbar {
+    padding: 18px 28px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    flex-wrap: wrap;
+  }
+  .topbar h1 { font-size: 20px; font-weight: 600; }
+  .topbar .sub { color: var(--muted); font-size: 13px; margin-top: 2px; }
+  .app-version {
+    margin-left: auto;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    color: var(--muted);
+    border: 1px solid var(--border);
+    background: var(--panel-2);
+    padding: 4px 10px;
+    border-radius: 12px;
+    align-self: flex-start;
+  }
+
+  .lock-box { display: none; }
+  .vg-locked-hint {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--panel-2);
+    border: 1px solid var(--amber);
+    color: var(--amber);
+    padding: 10px 14px;
+    border-radius: var(--radius);
+    font-size: 13px;
+    margin-bottom: 16px;
+  }
+  .vg-locked-hint.unlocked-hint { border-color: var(--green); color: var(--green); }
+  .vg-locked-hint button { font-size: 12px; padding: 5px 10px; }
+  .vg-backup-row {
+    display: flex;
+    gap: 10px;
+    margin-top: 12px;
+    padding-top: 18px;
+    border-top: 1px solid var(--border);
+  }
+
+  /* ---------- Gelöscht ---------- */
+  .deleted-retention-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 13px;
+    color: var(--muted);
+    margin-bottom: 14px;
+    padding-bottom: 14px;
+    border-bottom: 1px solid var(--border);
+  }
+  .admin-settings-row {
+    padding: 12px 28px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    gap: 32px;
+    flex-wrap: wrap;
+    background: var(--panel);
+  }
+  .admin-setting { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--muted); }
+  .admin-setting label { white-space: nowrap; }
+  .deleted-selectall { font-size: 13px; margin-bottom: 10px; }
+  .deleted-bulk-actions {
+    display: flex;
+    gap: 24px;
+    flex-wrap: wrap;
+    margin-bottom: 16px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid var(--border);
+  }
+  .deleted-bulk-group { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .deleted-bulk-group span { font-size: 12px; color: var(--muted); margin-right: 2px; }
+  .deleted-bulk-group .btn { font-size: 12px; padding: 6px 10px; }
+  .deleted-list { display: flex; flex-direction: column; gap: 10px; max-height: 50vh; overflow-y: auto; }
+  .deleted-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 10px 12px;
+  }
+  .deleted-item input[type=checkbox] { margin-top: 4px; flex-shrink: 0; }
+  .deleted-item-info { flex: 1; min-width: 0; }
+  .deleted-item-title { font-weight: 600; font-size: 13.5px; color: var(--text); }
+  .deleted-item-meta { font-size: 11px; color: var(--muted); margin: 2px 0 4px; }
+  .deleted-item-desc { font-size: 12.5px; color: var(--text); opacity: .9; }
+  .deleted-item-actions { display: flex; flex-direction: column; gap: 6px; flex-shrink: 0; }
+  .deleted-item-actions .btn { font-size: 11px; padding: 5px 9px; white-space: nowrap; }
+
+  .tabs-row {
+    display: flex;
+    justify-content: center;
+    padding: 14px 28px;
+    border-bottom: 1px solid var(--border);
+    background: var(--panel);
+  }
+
+  .tabs {
+    display: flex;
+    gap: 4px;
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 4px;
+  }
+  .tab {
+    padding: 10px 28px;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--muted);
+    background: transparent;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-family: 'IBM Plex Sans', sans-serif;
+    letter-spacing: 0.01em;
+  }
+  .tab.active { background: var(--amber); color: #1a1300; box-shadow: 0 2px 10px rgba(232,163,61,.35); }
+  .tab .count { opacity: .75; margin-left: 6px; }
+
+  .user-row {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 28px;
+    border-bottom: 1px solid var(--border);
+    background: var(--panel);
+  }
+  .user-row-label {
+    font-size: 12px;
+    color: var(--muted);
+    font-weight: 500;
+  }
+  .user-row select#benutzer { width: 200px; }
+
+  .actions-row {
+    padding: 16px 28px;
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    border-bottom: 1px solid var(--border);
+  }
+
+  select, input[type=text], input[type=date], input[type=password], input[type=email] {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 8px 10px;
+    border-radius: var(--radius);
+    font-size: 13px;
+    font-family: 'IBM Plex Sans', sans-serif;
+  }
+  select:focus, input:focus, textarea:focus, button:focus-visible {
+    outline: 2px solid var(--teal);
+    outline-offset: 1px;
+  }
+
+  button {
+    cursor: pointer;
+    font-family: 'IBM Plex Sans', sans-serif;
+  }
+
+  .btn {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 8px 14px;
+    border-radius: var(--radius);
+    font-size: 13px;
+    font-weight: 500;
+  }
+  .btn:hover { border-color: var(--muted); }
+  .btn-primary { background: var(--amber); color: #1a1300; border-color: var(--amber); font-weight: 600; }
+  .btn-primary:hover { filter: brightness(1.08); }
+  .btn-danger { color: var(--rust); }
+  .btn-danger:hover { border-color: var(--rust); }
+  .btn-ghost { background: transparent; border: 1px solid transparent; color: var(--muted); padding: 6px 10px; }
+  .btn-ghost:hover { color: var(--text); }
+
+  .content { padding: 20px 28px 60px; overflow-y: auto; }
+
+  .filter-sort-row { display: flex; gap: 32px; flex-wrap: wrap; max-width: 920px; }
+  .filter-block { margin-bottom: 18px; }
+  .filter-block h3 {
+    font-size: 12px;
+    color: var(--amber);
+    font-weight: 600;
+    margin-bottom: 8px;
+  }
+  .filter-controls { display: flex; gap: 10px; flex-wrap: wrap; }
+
+  .empty {
+    color: var(--muted);
+    padding: 60px 20px;
+    text-align: center;
+    font-size: 14px;
+    border: 1px dashed var(--border);
+    border-radius: var(--radius);
+  }
+
+  /* ---------- Task cards ---------- */
+  .list { display: flex; flex-direction: column; gap: 10px; max-width: 920px; }
+
+  .card {
+    background: #ffffff;
+    border: 1px solid var(--border);
+    border-left: 8px solid var(--muted);
+    border-radius: var(--radius);
+    padding: 14px 18px;
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 8px 16px;
+    cursor: pointer;
+  }
+  .card:hover { filter: brightness(1.08); }
+  .card.prio-Hoch { border-left-color: var(--rust); }
+  .card.prio-Mittel { border-left-color: var(--amber); }
+  .card.prio-Niedrig { border-left-color: var(--teal); }
+  .card.card-disabled { pointer-events: none; opacity: .5; cursor: not-allowed; }
+  .card.done { background: #ffffff; opacity: 1; }
+
+  .card-head {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  .card-head .ort { font-weight: 600; font-size: 15px; color: #000; }
+  .card-head .anlage { color: #000; font-size: 13px; }
+  .card-desc { color: #000; font-size: 13.5px; grid-column: 1 / -1; opacity: .9; }
+  .card-meta {
+    grid-column: 1 / -1;
+    display: flex;
+    gap: 14px;
+    flex-wrap: wrap;
+    font-size: 12px;
+    color: #000;
+  }
+  .tag {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 11px;
+    font-weight: 600;
+    border: 1px solid var(--border);
+  }
+  .tag-Hoch { color: var(--rust); border-color: var(--rust); }
+  .tag-Mittel { color: var(--amber); border-color: var(--amber); }
+  .tag-Niedrig { color: var(--teal); border-color: var(--teal); }
+
+  .card-side { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; justify-content: space-between; }
+  .img-btn {
+    font-size: 11px;
+    padding: 4px 9px;
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    color: var(--muted);
+    border-radius: 10px;
+    cursor: pointer;
+  }
+  .img-btn:hover { color: var(--teal); border-color: var(--teal); }
+  .card-disabled .img-btn { pointer-events: auto; }
+  .image-viewer-modal { max-width: min(90vw, 720px); text-align: center; }
+  .image-viewer-modal img { max-width: 100%; max-height: 75vh; border-radius: 4px; object-fit: contain; }
+
+  /* ---------- Modal ---------- */
+  .overlay {
+    position: fixed; inset: 0;
+    background: rgba(10,12,13,.72);
+    display: none;
+    align-items: flex-start;
+    justify-content: center;
+    padding: 40px 16px;
+    overflow-y: auto;
+    z-index: 40;
+  }
+  .overlay.open { display: flex; }
+  #unlockOverlay { z-index: 60; }
+  .modal {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    width: 100%;
+    max-width: 560px;
+    padding: 24px;
+  }
+  .modal h2 { font-size: 17px; margin-bottom: 4px; }
+  .modal .close-x { position: absolute; }
+  .modal-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 18px; }
+
+  .field { margin-bottom: 14px; }
+  .field label {
+    display: block;
+    font-size: 12px;
+    color: var(--muted);
+    margin-bottom: 5px;
+    font-weight: 500;
+  }
+  .field select, .field input, .field textarea { width: 100%; }
+  textarea {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 8px 10px;
+    border-radius: var(--radius);
+    font-size: 13px;
+    font-family: 'IBM Plex Sans', sans-serif;
+    resize: vertical;
+    min-height: 70px;
+  }
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+
+  .modal-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 20px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border);
+  }
+
+  /* ---------- Vorgaben manager ---------- */
+  .vg-cat { margin-bottom: 18px; }
+  .vg-cat h3 { font-size: 13px; color: var(--amber); margin-bottom: 8px; font-weight: 600; }
+  .vg-dep { color: var(--muted); font-weight: 400; font-size: 11px; margin-left: 6px; }
+  .vg-cat-dependent { padding: 12px; background: var(--panel-2); border: 1px solid var(--border); border-radius: var(--radius); }
+  .vg-subgroup { padding: 10px 0; border-top: 1px solid var(--border); }
+  .vg-subgroup:first-of-type { border-top: none; padding-top: 4px; }
+  .vg-subgroup-title { font-size: 12px; font-weight: 600; color: var(--teal); margin-bottom: 6px; }
+  .vg-empty-hint { color: var(--muted); font-size: 12px; }
+  .vg-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+  .vg-chip {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 4px 6px 4px 10px;
+    font-size: 12px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .vg-chip button {
+    background: none; border: none; color: var(--muted);
+    font-size: 13px; line-height: 1; padding: 0 2px;
+  }
+  .vg-chip button:hover { color: var(--rust); }
+  .vg-chip button.edit-btn:hover { color: var(--teal); }
+  .vg-chip button:disabled { opacity: .3; cursor: default; }
+  .vg-chip button:disabled:hover { color: var(--muted); }
+  .vg-add { display: flex; gap: 6px; }
+  .vg-add input { flex: 1; }
+  .vg-chip.editing {
+    background: var(--panel);
+    border-color: var(--teal);
+    padding: 3px 3px 3px 3px;
+  }
+  .vg-chip.editing input {
+    background: transparent;
+    border: none;
+    color: var(--text);
+    font-size: 12px;
+    padding: 1px 4px;
+    width: 110px;
+  }
+  .vg-chip.editing input:focus { outline: none; }
+
+  .vg-color-dot {
+    width: 14px; height: 14px;
+    border-radius: 3px;
+    display: inline-block;
+    border: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  .vg-color-input {
+    width: 26px; height: 22px;
+    padding: 0 1px;
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    background: none;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+
+  .banner {
+    margin: 16px 28px 0;
+    padding: 12px 16px;
+    background: #2a1f14;
+    border: 1px solid var(--amber);
+    border-radius: var(--radius);
+    font-size: 13px;
+    color: var(--amber);
+  }
+  .banner code { background: rgba(0,0,0,.3); padding: 1px 5px; border-radius: 2px; }
+
+  .status-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    display: inline-block; margin-right: 5px;
+    background: var(--teal);
+  }
+  .status-dot.offline { background: var(--rust); }
+
+  /* ---------- App-Zugangssperre ---------- */
+  .app-gate {
+    position: fixed;
+    inset: 0;
+    background: var(--bg);
+    z-index: 200;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+  }
+  .app-gate-box {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 32px;
+    width: 100%;
+    max-width: 320px;
+    text-align: center;
+  }
+  .app-gate-box h2 { margin-bottom: 8px; }
+  .app-gate-box p { color: var(--muted); font-size: 13px; margin-bottom: 18px; }
+  .app-gate-box input { width: 100%; margin-bottom: 10px; text-align: center; }
+  .app-gate-box button { width: 100%; }
+  .gate-hint { color: var(--rust); font-size: 12px; margin-bottom: 10px; min-height: 14px; }
+
+  /* ---------- Toasts ---------- */
+  .toast-container {
+    position: fixed;
+    top: 16px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 100;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    align-items: center;
+    max-height: min(60vh, 420px);
+    overflow-y: auto;
+    padding: 4px 2px;
+    pointer-events: auto;
+  }
+  .toast {
+    pointer-events: auto;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-left: 4px solid var(--teal);
+    color: var(--text);
+    padding: 10px 34px 10px 16px;
+    border-radius: var(--radius);
+    font-size: 13px;
+    box-shadow: 0 4px 16px rgba(0,0,0,.35);
+    max-width: 420px;
+    width: max-content;
+    position: relative;
+    flex-shrink: 0;
+    animation: toast-in .15s ease-out;
+  }
+  .toast .toast-close {
+    position: absolute;
+    top: 6px;
+    right: 8px;
+    background: none;
+    border: none;
+    color: var(--muted);
+    font-size: 13px;
+    line-height: 1;
+    padding: 2px;
+  }
+  .toast .toast-close:hover { color: var(--text); }
+  .toast.success { border-left-color: var(--green); }
+  .toast.error { border-left-color: var(--rust); }
+  @keyframes toast-in {
+    from { opacity: 0; transform: translateY(-8px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  ::-webkit-scrollbar { width: 10px; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 5px; }
+
+  @media (max-width: 640px) {
+    .topbar { padding: 14px 16px; }
+    .tabs-row { padding: 12px 16px; }
+    .tab { padding: 9px 16px; font-size: 13px; }
+    .actions-row { padding: 12px 16px; flex-wrap: wrap; }
+    .user-row { padding: 10px 16px; flex-wrap: wrap; }
+    .content { padding: 16px 16px 60px; }
+    .grid-2 { grid-template-columns: 1fr; }
+    .card { grid-template-columns: 1fr; }
+    .card-side { flex-direction: row; align-items: center; }
+    .rail { width: 40px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="toast-container" id="toastContainer"></div>
+
+<div class="app-gate" id="appGate">
+  <div class="app-gate-box">
+    <h2>🔒 Zugang</h2>
+    <p>Bitte das Zugangspasswort eingeben, um die Instandhaltungs-App zu öffnen.</p>
+    <input type="password" id="gatePassword" autocomplete="off" placeholder="Passwort" onkeydown="if(event.key==='Enter')doGateUnlock()">
+    <div id="gateHint" class="gate-hint"></div>
+    <button class="btn btn-primary" onclick="doGateUnlock()">Öffnen</button>
+  </div>
+</div>
+
+<div class="app" id="mainApp" style="display:none">
+  <div class="rail">
+    <button class="info-btn" onclick="openInfoModal()" title="Info">?</button>
+    <span class="mark">INSTANDHALTUNG</span>
+  </div>
+
+  <div class="main">
+    <div class="topbar">
+      <div>
+        <h1>Auftragsliste</h1>
+        <div class="sub"><span id="statusDot" class="status-dot offline"></span><span id="statusText">verbinde…</span></div>
+      </div>
+      <div class="app-version" id="appVersionBox"></div>
+    </div>
+
+    <div class="tabs-row">
+      <div class="tabs">
+        <button class="tab active" id="tabOffen" onclick="setTab('offen')">Offen <span class="count" id="countOffen">0</span></button>
+        <button class="tab" id="tabErledigt" onclick="setTab('erledigt')">Erledigt <span class="count" id="countErledigt">0</span></button>
+      </div>
+    </div>
+
+    <div class="user-row">
+      <label for="benutzer" class="user-row-label">Benutzername</label>
+      <select id="benutzer" class="mono" onchange="render()"></select>
+    </div>
+
+    <div id="configBanner" class="banner" style="display:none">
+      Es ist noch keine Firebase-Verbindung eingerichtet. Öffne diese Datei in einem Texteditor, suche <code>FIREBASE_CONFIG</code> am Ende der Datei und trage dort deine eigenen Zugangsdaten aus der Firebase-Konsole ein. Erst danach werden Einträge dauerhaft und geräteübergreifend gespeichert.
+    </div>
+
+    <div class="actions-row">
+      <button class="btn btn-primary" onclick="openTaskModal()">+ Neuer Auftrag</button>
+      <button class="btn" onclick="openVorgabenModal()">Listenvorgaben</button>
+      <button class="btn" id="deletedBtn" onclick="openDeletedModal()" style="display:none">Gelöscht</button>
+      <button class="btn" id="lockToggleBtn" onclick="onLockToggleClick()" style="margin-left:auto">🔒 Entsperren</button>
+    </div>
+
+    <div class="admin-settings-row" id="adminSettingsRow" style="display:none">
+      <div class="admin-setting">
+        <label for="erledigtRetentionModus">„Erledigt" nach „Gelöscht" verschieben (Tage, 0 = aus)</label>
+        <select id="erledigtRetentionModus" onchange="onErledigtRetentionChange()">
+          <option value="nie">nie</option>
+          <option value="sofort">sofort</option>
+          <option value="tage">Anzahl Tage</option>
+        </select>
+        <input type="number" id="erledigtRetentionTage" min="1" step="1" value="1" style="width:70px;display:none" onchange="onErledigtRetentionChange()">
+      </div>
+      <div class="admin-setting">
+        <label for="inactivityMinutes">Inaktiv nach (Minuten, 0 = aus):</label>
+        <input type="number" id="inactivityMinutes" min="0" step="1" value="0" style="width:70px" onchange="onInactivityChange()">
+      </div>
+    </div>
+
+    <div class="content">
+      <div class="filter-sort-row">
+        <div class="filter-block">
+          <h3>Filter</h3>
+          <div class="filter-controls">
+            <select id="filterOrt" onchange="render()"><option value="">Alle Arbeitsorte</option></select>
+            <select id="filterAnlage" onchange="render()"><option value="">Alle Anlagen</option></select>
+            <select id="filterPrio" onchange="render()">
+              <option value="">Alle Prioritäten</option>
+              <option>Hoch</option><option>Mittel</option><option>Niedrig</option>
+            </select>
+            <select id="filterAusfuehrender" onchange="render()"><option value="">Alle Ausführenden</option></select>
+          </div>
+        </div>
+        <div class="filter-block" id="sortBlock">
+          <h3>Sortierung</h3>
+          <div class="filter-controls">
+            <select id="sortSelect" onchange="render()">
+              <option value="prioritaet">Priorität</option>
+              <option value="neueste">Neueste</option>
+              <option value="aelteste">Älteste</option>
+            </select>
+          </div>
+        </div>
+      </div>
+      <div id="list" class="list"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== Auftrag anlegen/bearbeiten ===== -->
+<div class="overlay" id="taskOverlay">
+  <div class="modal">
+    <div class="modal-header">
+      <div>
+        <h2 id="taskModalTitle">Neuer Auftrag</h2>
+        <div class="sub mono" id="taskModalMeta" style="color:var(--muted);font-size:12px"></div>
+      </div>
+      <button class="btn-ghost" onclick="closeTaskModal()">✕</button>
+    </div>
+
+    <div class="grid-2">
+      <div class="field">
+        <label>Arbeitsort</label>
+        <select id="f_arbeitsort" onchange="onFormArbeitsortChange()"></select>
+      </div>
+      <div class="field">
+        <label>Anlage</label>
+        <select id="f_anlage" onchange="onFormAnlageChange()"></select>
+      </div>
+      <div class="field">
+        <label>Anlagenteil</label>
+        <select id="f_anlagenteil"></select>
+      </div>
+      <div class="field">
+        <label>Priorität</label>
+        <select id="f_prioritaet"><option>Hoch</option><option>Mittel</option><option>Niedrig</option></select>
+      </div>
+      <div class="field">
+        <label>Status</label>
+        <select id="f_status"></select>
+      </div>
+      <div class="field">
+        <label>Ausführender</label>
+        <select id="f_ausfuehrender"></select>
+      </div>
+    </div>
+
+    <div class="field">
+      <label>Beschreibung</label>
+      <textarea id="f_beschreibung" placeholder="Was ist zu tun?"></textarea>
+    </div>
+
+    <div class="field">
+      <label>Bild (optional)</label>
+      <input type="file" id="f_bild_input" accept="image/*" onchange="onImageFileSelected(event)">
+      <div id="bildPreviewWrap" style="display:none;margin-top:8px;">
+        <img id="bildPreview" style="max-width:180px;max-height:130px;border-radius:4px;border:1px solid var(--border);display:block;margin-bottom:6px;">
+        <button type="button" class="btn btn-danger" onclick="removeImage()">Bild entfernen</button>
+      </div>
+    </div>
+
+    <div class="modal-footer">
+      <div>
+        <button class="btn btn-danger" id="deleteTaskBtn" onclick="deleteCurrentTask()" style="display:none">Löschen</button>
+        <button class="btn" id="restoreTaskBtn" onclick="restoreCurrentTask()" style="display:none">Wiederherstellen</button>
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="btn" id="doneTaskBtn" onclick="markDone()">Als erledigt markieren</button>
+        <button class="btn btn-primary" onclick="saveTask()">Speichern</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== Vorgabenlisten verwalten ===== -->
+<div class="overlay" id="vgOverlay">
+  <div class="modal" style="max-width:640px">
+    <div class="modal-header">
+      <div>
+        <h2>Listenvorgaben</h2>
+        <div class="sub" style="color:var(--muted);font-size:12px;margin-top:2px">Auswahlwerte für alle Auftragsfelder anlegen, umbenennen und löschen</div>
+      </div>
+      <button class="btn-ghost" onclick="closeVorgabenModal()">✕</button>
+    </div>
+    <div id="vgCategories"></div>
+    <div class="modal-footer" style="justify-content:flex-end">
+      <button class="btn btn-primary" onclick="closeVorgabenModal()">Fertig</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== Bildansicht ===== -->
+<div class="overlay" id="imageViewerOverlay">
+  <div class="modal image-viewer-modal">
+    <div class="modal-header">
+      <h2>Bild</h2>
+      <button class="btn-ghost" onclick="closeImageViewer()">✕</button>
+    </div>
+    <img id="imageViewerImg" alt="Auftragsbild">
+  </div>
+</div>
+
+<!-- ===== Info ===== -->
+<div class="overlay" id="infoOverlay">
+  <div class="modal" style="max-width:320px">
+    <div class="modal-header">
+      <h2>Info</h2>
+      <button class="btn-ghost" onclick="closeInfoModal()">✕</button>
+    </div>
+    <div id="infoTextBox" style="font-size:13px;line-height:1.8;color:var(--text);white-space:pre-line"></div>
+  </div>
+</div>
+
+<!-- ===== Gelöscht ===== -->
+<div class="overlay" id="deletedOverlay">
+  <div class="modal" style="max-width:760px">
+    <div class="modal-header">
+      <div>
+        <h2>Gelöscht</h2>
+        <div class="sub" style="color:var(--muted);font-size:12px;margin-top:2px">Gelöschte Aufträge — zuletzt gelöschte zuerst</div>
+      </div>
+      <button class="btn-ghost" onclick="closeDeletedModal()">✕</button>
+    </div>
+
+    <div class="deleted-retention-row">
+      <label for="retentionModus">Endgültig löschen nach:</label>
+      <select id="retentionModus" onchange="onRetentionChange()">
+        <option value="nie">nie</option>
+        <option value="sofort">sofort</option>
+        <option value="tage">Anzahl Tage</option>
+      </select>
+      <input type="number" id="retentionTage" min="1" step="1" value="1" style="width:70px;display:none" onchange="onRetentionChange()">
+    </div>
+
+    <div class="deleted-selectall">
+      <label><input type="checkbox" id="selectAllDeleted" onchange="toggleSelectAllDeleted()"> Alle auswählen</label>
+    </div>
+
+    <div class="deleted-bulk-actions">
+      <div class="deleted-bulk-group">
+        <span>Auswahl:</span>
+        <button class="btn" onclick="bulkAction('selected','restore')">Wiederherstellen</button>
+        <button class="btn" onclick="bulkAction('selected','done')">In Erledigt</button>
+        <button class="btn btn-danger" onclick="bulkAction('selected','purge')">Löschen</button>
+      </div>
+      <div class="deleted-bulk-group">
+        <span>Alle:</span>
+        <button class="btn" onclick="bulkAction('all','restore')">Wiederherstellen</button>
+        <button class="btn" onclick="bulkAction('all','done')">In Erledigt</button>
+        <button class="btn btn-danger" onclick="bulkAction('all','purge')">Löschen</button>
+      </div>
+    </div>
+
+    <div id="deletedList" class="deleted-list"></div>
+  </div>
+</div>
+
+<!-- ===== Entsperren ===== -->
+<div class="overlay" id="unlockOverlay">
+  <div class="modal" style="max-width:340px">
+    <div class="modal-header">
+      <h2>Entsperren</h2>
+      <button class="btn-ghost" onclick="closeUnlockModal()">✕</button>
+    </div>
+    <div class="field">
+      <label>Passwort</label>
+      <input type="password" id="unlockPassword" autocomplete="off" onkeydown="if(event.key==='Enter')doUnlock()">
+    </div>
+    <div id="unlockHint" style="color:var(--muted);font-size:12px;margin-bottom:4px"></div>
+    <div class="modal-footer" style="justify-content:flex-end">
+      <button class="btn btn-primary" onclick="doUnlock()">Entsperren</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ============================================================
+   FIREBASE-KONFIGURATION
+   Erstelle ein kostenloses Firebase-Projekt auf https://console.firebase.google.com
+   -> Firestore Database anlegen (im Testmodus starten)
+   -> Projekteinstellungen -> "Web-App hinzufügen" -> Konfigurationsobjekt hierher kopieren.
+   Solange hier Platzhalter stehen, läuft die App nur lokal ohne Speicherung.
+============================================================ */
+const FIREBASE_CONFIG = {
+  apiKey: "AIzaSyBxuRXLqcTnOgqS3u6uz5JbUc9g6M1UoOM",
+  authDomain: "instandhaltung-e086a.firebaseapp.com",
+  projectId: "instandhaltung-e086a",
+  storageBucket: "instandhaltung-e086a.firebasestorage.app",
+  messagingSenderId: "407544379405",
+  appId: "1:407544379405:web:c4f3b980ad26e5c7663d44"
+};
+
+/* Trage hier deine aktuelle Versionsnummer ein — erscheint oben rechts in der App. */
+const APP_VERSION = "v1.3";
+
+const DEFAULT_VORGABEN = {
+  arbeitsort: ["Halle 1", "Halle 2", "Außenbereich"],
+  anlage: { "Halle 1": ["Anlage A"], "Halle 2": ["Anlage B"], "Außenbereich": [] },
+  anlagenteil: { "Anlage A": ["Motor", "Steuerung"], "Anlage B": ["Förderband"] },
+  status: ["Offen", "In Arbeit", "Wartet auf Ersatzteil"],
+  statusFarben: { "Offen": "#2c3238", "In Arbeit": "#3a2f18", "Wartet auf Ersatzteil": "#3a2420" },
+  ausfuehrender: ["Nicht zugewiesen"],
+  benutzername: []
+};
+
+const DEFAULT_INFO_TEXT = "(c) Keller Martin\nA-7545 Neustift bei Güssing\nkreativ_talk@gmx.at\nv 1.0";
+
+let db = null;
+let unlocked = false;
+let accessPassword = null;
+let appGatePassword = null;
+let appUnlocked = false;
+let infoText = DEFAULT_INFO_TEXT;
+let tasks = [];
+let vorgaben = null;
+let currentTab = 'offen';
+let editingTaskId = null;
+let editingIsDone = false;
+
+function isConfigured() {
+  return FIREBASE_CONFIG.apiKey && !FIREBASE_CONFIG.apiKey.startsWith("DEIN_");
+}
+
+function setStatus(online, text) {
+  document.getElementById('statusDot').classList.toggle('offline', !online);
+  document.getElementById('statusText').textContent = text;
+}
+
+function showToast(message, type) {
+  const container = document.getElementById('toastContainer');
+  const el = document.createElement('div');
+  el.className = 'toast ' + (type || 'info');
+  el.textContent = message;
+  const closeBtn = document.createElement('button');
+  closeBtn.className = 'toast-close';
+  closeBtn.textContent = '✕';
+  closeBtn.title = 'Schließen';
+  closeBtn.onclick = () => el.remove();
+  el.appendChild(closeBtn);
+  container.appendChild(el);
+  // Höchstens 4 Meldungen gleichzeitig anzeigen, ältere zuerst entfernen
+  while (container.children.length > 4) container.firstElementChild.remove();
+  setTimeout(() => el.remove(), type === 'error' ? 6000 : 3000);
+}
+
+/* ---------- Entsperren (Passwort aus der Datenbank, nur für Listenvorgaben) ---------- */
+function openUnlockModal() {
+  document.getElementById('unlockPassword').value = '';
+  document.getElementById('unlockHint').textContent = '';
+  document.getElementById('unlockOverlay').classList.add('open');
+  document.getElementById('unlockPassword').focus();
+}
+function closeUnlockModal() {
+  document.getElementById('unlockOverlay').classList.remove('open');
+}
+
+/* ---------- Info ---------- */
+function updateInfoModalContent() {
+  const box = document.getElementById('infoTextBox');
+  if (box) box.textContent = infoText;
+}
+function openInfoModal() {
+  updateInfoModalContent();
+  document.getElementById('infoOverlay').classList.add('open');
+}
+function closeInfoModal() {
+  document.getElementById('infoOverlay').classList.remove('open');
+}
+function doUnlock() {
+  if (accessPassword === null) { document.getElementById('unlockHint').textContent = 'Verbindung zur Datenbank noch nicht bereit — kurz warten und erneut versuchen.'; return; }
+  const pw = document.getElementById('unlockPassword').value;
+  if (pw === accessPassword) {
+    unlocked = true;
+    closeUnlockModal();
+    renderVorgabenModal();
+    updateDeletedButtonVisibility();
+    showToast('Entsperrt.', 'success');
+  } else {
+    document.getElementById('unlockHint').textContent = 'Falsches Passwort.';
+  }
+}
+function lockAgain() {
+  unlocked = false;
+  renderVorgabenModal();
+  updateDeletedButtonVisibility();
+  closeDeletedModal();
+  showToast('Gesperrt.', 'success');
+}
+
+/* ---------- App-Zugangssperre (eigenes Passwort, vor dem Öffnen der App) ---------- */
+function doGateUnlock() {
+  const pw = document.getElementById('gatePassword').value;
+  if (appGatePassword === null) {
+    document.getElementById('gateHint').textContent = 'Verbindung wird aufgebaut — kurz warten und erneut versuchen.';
+    return;
+  }
+  if (pw === appGatePassword) {
+    appUnlocked = true;
+    document.getElementById('appGate').style.display = 'none';
+    document.getElementById('mainApp').style.display = 'flex';
+    maybeRunCleanup();
+    resetInactivityTimer();
+  } else {
+    document.getElementById('gateHint').textContent = 'Falsches Passwort.';
+    document.getElementById('gatePassword').value = '';
+    document.getElementById('gatePassword').focus();
+  }
+}
+
+function initFirebase() {
+  if (!isConfigured()) {
+    document.getElementById('appGate').style.display = 'flex';
+    document.getElementById('gateHint').style.color = 'var(--amber)';
+    document.getElementById('gateHint').textContent = 'Keine Datenbankverbindung eingerichtet — der Zugang ist ohne Verbindung nicht möglich.';
+    document.querySelector('#appGate .app-gate-box p').textContent = 'Bitte zuerst FIREBASE_CONFIG in der Datei ausfüllen.';
+    document.getElementById('gatePassword').style.display = 'none';
+    document.querySelector('#appGate .app-gate-box button').style.display = 'none';
+    return;
+  }
+
+  // Zugangssperre IMMER zuerst anzeigen — noch bevor irgendein Firebase-Aufruf
+  // passiert. Schlägt die Verbindung gleich fehl, sieht man wenigstens eine
+  // Fehlermeldung statt eines leeren/schwarzen Bildschirms.
+  document.getElementById('appGate').style.display = 'flex';
+  document.getElementById('gatePassword').focus();
+
+  try {
+    firebase.initializeApp(FIREBASE_CONFIG);
+    db = firebase.firestore();
+  } catch (err) {
+    document.getElementById('gateHint').style.color = 'var(--rust)';
+    document.getElementById('gateHint').textContent = 'Verbindung zu Firebase fehlgeschlagen: ' + err.message;
+    document.getElementById('gatePassword').style.display = 'none';
+    document.querySelector('#appGate .app-gate-box button').style.display = 'none';
+    return;
+  }
+
+  // Legt ein meta-Dokument NUR dann mit Standardwerten an, wenn über eine
+  // bestätigte Serverabfrage feststeht, dass es wirklich noch nicht existiert.
+  // So kann ein Offline-Zustand (leerer Cache) niemals echte, bereits
+  // gespeicherte Daten mit den Standardwerten überschreiben.
+  function initMetaDoc(docId, defaultValue) {
+    db.collection('meta').doc(docId).get({ source: 'server' }).then(snap => {
+      if (!snap.exists) {
+        db.collection('meta').doc(docId).set(defaultValue)
+          .catch(err => showToast(`„${docId}" konnte nicht angelegt werden: ` + err.message, 'error'));
+      }
+    }).catch(err => {
+      showToast(`Keine Verbindung zum Anlegen von „${docId}" (offline?): ` + err.message, 'error');
+    });
+  }
+
+  initMetaDoc('appzugriff', { passwort: '0000' });
+  initMetaDoc('zugriff', { passwort: '1234' });
+  initMetaDoc('vorgaben', DEFAULT_VORGABEN);
+  initMetaDoc('info', { text: DEFAULT_INFO_TEXT });
+  initMetaDoc('aufbewahrung', { modus: 'nie', tage: 1 });
+  initMetaDoc('aufbewahrungErledigt', { modus: 'nie', tage: 1 });
+  initMetaDoc('inaktivitaet', { minuten: 0 });
+
+  db.collection('meta').doc('appzugriff').onSnapshot(snap => {
+    if (snap.exists && snap.data().passwort) {
+      appGatePassword = snap.data().passwort;
+    }
+  }, err => showToast('Verbindung zum Zugangsschutz fehlgeschlagen: ' + err.message, 'error'));
+
+  db.collection('meta').doc('zugriff').onSnapshot(snap => {
+    if (snap.exists && snap.data().passwort) {
+      accessPassword = snap.data().passwort;
+    }
+  }, err => showToast('Verbindung zum Zugriffsschutz fehlgeschlagen: ' + err.message, 'error'));
+
+  db.collection('meta').doc('info').onSnapshot(snap => {
+    if (snap.exists && snap.data().text) {
+      infoText = snap.data().text;
+      updateInfoModalContent();
+    }
+  }, err => showToast('Verbindung zum Infotext fehlgeschlagen: ' + err.message, 'error'));
+
+  db.collection('meta').doc('aufbewahrung').onSnapshot(snap => {
+    retentionDeleted = (snap.exists && snap.data().modus) ? snap.data() : { modus: 'nie', tage: 1 };
+    updateRetentionModusUI('retentionModus', 'retentionTage', retentionDeleted);
+    maybeRunCleanup();
+  }, err => showToast('Verbindung zur Aufbewahrungsfrist fehlgeschlagen: ' + err.message, 'error'));
+
+  db.collection('meta').doc('aufbewahrungErledigt').onSnapshot(snap => {
+    retentionErledigt = (snap.exists && snap.data().modus) ? snap.data() : { modus: 'nie', tage: 1 };
+    updateRetentionModusUI('erledigtRetentionModus', 'erledigtRetentionTage', retentionErledigt);
+    maybeRunCleanup();
+  }, err => showToast('Verbindung zur Erledigt-Aufräumregel fehlgeschlagen: ' + err.message, 'error'));
+
+  db.collection('meta').doc('inaktivitaet').onSnapshot(snap => {
+    inactivityMinutes = (snap.exists && typeof snap.data().minuten === 'number') ? snap.data().minuten : 0;
+    const inp = document.getElementById('inactivityMinutes');
+    if (inp) inp.value = inactivityMinutes;
+    resetInactivityTimer();
+  }, err => showToast('Verbindung zur Inaktivitäts-Einstellung fehlgeschlagen: ' + err.message, 'error'));
+
+  db.collection('meta').doc('vorgaben').onSnapshot(snap => {
+    if (snap.exists) {
+      vorgaben = snap.data();
+      populateVorgabenSelects();
+      renderVorgabenModal();
+    }
+  }, err => { setStatus(false, 'Fehler: ' + err.message); showToast('Verbindung zu den Listenvorgaben fehlgeschlagen: ' + err.message, 'error'); });
+
+  db.collection('auftraege').orderBy('createdAt', 'desc').onSnapshot(snap => {
+    tasks = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    tasksLoaded = true;
+    setStatus(true, 'verbunden — Änderungen werden live synchronisiert');
+    render();
+    if (document.getElementById('deletedOverlay').classList.contains('open')) renderDeletedList();
+    maybeRunCleanup();
+  }, err => { setStatus(false, 'Fehler: ' + err.message); showToast('Verbindung zur Auftragsliste fehlgeschlagen: ' + err.message, 'error'); });
+}
+
+/* ---------- Tabs ---------- */
+function setTab(tab) {
+  currentTab = tab;
+  document.getElementById('tabOffen').classList.toggle('active', tab === 'offen');
+  document.getElementById('tabErledigt').classList.toggle('active', tab === 'erledigt');
+  document.getElementById('sortBlock').style.display = tab === 'erledigt' ? 'none' : '';
+  render();
+}
+
+/* ---------- Vorgaben: Selects befüllen ---------- */
+function fillSelect(id, values) {
+  const sel = document.getElementById(id);
+  const prev = sel.value;
+  sel.innerHTML = values.map(v => `<option>${escapeHtml(v)}</option>`).join('');
+  sel.value = values.includes(prev) ? prev : (values[0] || '');
+}
+
+function fillSelectWithBlank(id, values, blankLabel) {
+  const sel = document.getElementById(id);
+  const prev = sel.value;
+  sel.innerHTML = `<option value="">${escapeHtml(blankLabel)}</option>` + values.map(v => `<option>${escapeHtml(v)}</option>`).join('');
+  sel.value = values.includes(prev) ? prev : '';
+}
+
+function requireBenutzer() {
+  const val = document.getElementById('benutzer').value;
+  if (!val) {
+    showToast('Bitte zuerst oben einen Benutzernamen auswählen.', 'error');
+    return null;
+  }
+  return val;
+}
+
+function populateVorgabenSelects() {
+  fillSelectWithBlank('f_arbeitsort', vorgaben.arbeitsort || [], '— bitte wählen —');
+  fillSelectWithBlank('f_status', vorgaben.status || [], '— bitte wählen —');
+  fillSelectWithBlank('f_ausfuehrender', vorgaben.ausfuehrender || [], '— bitte wählen —');
+  fillSelectWithBlank('benutzer', vorgaben.benutzername || [], '— Benutzer wählen —');
+
+  const ort = document.getElementById('f_arbeitsort').value;
+  fillSelectWithBlank('f_anlage', ort ? ((vorgaben.anlage && vorgaben.anlage[ort]) || []) : [], '— bitte wählen —');
+  const anlage = document.getElementById('f_anlage').value;
+  fillSelectWithBlank('f_anlagenteil', anlage ? ((vorgaben.anlagenteil && vorgaben.anlagenteil[anlage]) || []) : [], '— bitte wählen —');
+
+  // Filter-Dropdowns (unabhängig, zeigen alle vorhandenen Werte)
+  const fo = document.getElementById('filterOrt');
+  const prevFo = fo.value;
+  fo.innerHTML = '<option value="">Alle Arbeitsorte</option>' + (vorgaben.arbeitsort || []).map(v => `<option>${escapeHtml(v)}</option>`).join('');
+  fo.value = (vorgaben.arbeitsort || []).includes(prevFo) ? prevFo : '';
+
+  const allAnlagen = Array.from(new Set(Object.values(vorgaben.anlage || {}).flat()));
+  const fa = document.getElementById('filterAnlage');
+  const prevFa = fa.value;
+  fa.innerHTML = '<option value="">Alle Anlagen</option>' + allAnlagen.map(v => `<option>${escapeHtml(v)}</option>`).join('');
+  fa.value = allAnlagen.includes(prevFa) ? prevFa : '';
+
+  const fau = document.getElementById('filterAusfuehrender');
+  const prevFau = fau.value;
+  fau.innerHTML = '<option value="">Alle Ausführenden</option>' + (vorgaben.ausfuehrender || []).map(v => `<option>${escapeHtml(v)}</option>`).join('');
+  fau.value = (vorgaben.ausfuehrender || []).includes(prevFau) ? prevFau : '';
+}
+
+function onFormArbeitsortChange() {
+  const ort = document.getElementById('f_arbeitsort').value;
+  fillSelectWithBlank('f_anlage', ort ? ((vorgaben.anlage && vorgaben.anlage[ort]) || []) : [], '— bitte wählen —');
+  document.getElementById('f_anlage').value = '';
+  onFormAnlageChange();
+}
+function onFormAnlageChange() {
+  const anlage = document.getElementById('f_anlage').value;
+  fillSelectWithBlank('f_anlagenteil', anlage ? ((vorgaben.anlagenteil && vorgaben.anlagenteil[anlage]) || []) : [], '— bitte wählen —');
+  document.getElementById('f_anlagenteil').value = '';
+}
+
+/* ---------- Rendern der Liste ---------- */
+const PRIO_ORDER = { 'Hoch': 0, 'Mittel': 1, 'Niedrig': 2 };
+
+function tsMillis(ts) {
+  if (!ts) return 0;
+  if (typeof ts.toMillis === 'function') return ts.toMillis();
+  return 0;
+}
+
+function render() {
+  const list = document.getElementById('list');
+  const wantDone = currentTab === 'erledigt';
+  const benutzerChosen = !!document.getElementById('benutzer').value;
+  let filtered = tasks.filter(t => !t.geloescht && !!t.erledigt === wantDone);
+
+  const fAnlage = document.getElementById('filterAnlage').value;
+  const fOrt = document.getElementById('filterOrt').value;
+  const fPrio = document.getElementById('filterPrio').value;
+  const fAusf = document.getElementById('filterAusfuehrender').value;
+  if (fAnlage) filtered = filtered.filter(t => t.anlage === fAnlage);
+  if (fOrt) filtered = filtered.filter(t => t.arbeitsort === fOrt);
+  if (fPrio) filtered = filtered.filter(t => t.prioritaet === fPrio);
+  if (fAusf) filtered = filtered.filter(t => t.ausfuehrender === fAusf);
+
+  if (wantDone) {
+    // Im Bereich "Erledigt" immer zuletzt erledigt oben — Sortierung greift hier nicht.
+    filtered.sort((a, b) => (b.erledigtAm || '').localeCompare(a.erledigtAm || ''));
+  } else {
+    const sortMode = document.getElementById('sortSelect').value;
+    if (sortMode === 'neueste') {
+      filtered.sort((a, b) => tsMillis(b.createdAt) - tsMillis(a.createdAt));
+    } else if (sortMode === 'aelteste') {
+      filtered.sort((a, b) => tsMillis(a.createdAt) - tsMillis(b.createdAt));
+    } else {
+      filtered.sort((a, b) => (PRIO_ORDER[a.prioritaet] ?? 3) - (PRIO_ORDER[b.prioritaet] ?? 3));
+    }
+  }
+
+  document.getElementById('countOffen').textContent = tasks.filter(t => !t.geloescht && !t.erledigt).length;
+  document.getElementById('countErledigt').textContent = tasks.filter(t => !t.geloescht && t.erledigt).length;
+
+  if (filtered.length === 0) {
+    list.innerHTML = `<div class="empty">${wantDone ? 'Noch keine erledigten Aufträge.' : 'Keine offenen Aufträge — mit „+ Neuer Auftrag“ anlegen.'}</div>`;
+    return;
+  }
+
+  list.innerHTML = filtered.map(t => {
+    const color = !wantDone && vorgaben.statusFarben && vorgaben.statusFarben[t.status];
+    const bgAttr = color ? ` style="background:${escapeAttr(color)};"` : '';
+    const clickAttr = benutzerChosen ? ` onclick="openTaskModal('${t.id}')"` : '';
+    const disabledClass = benutzerChosen ? '' : ' card-disabled';
+    return `
+    <div class="card prio-${escapeHtml(t.prioritaet || '')} ${t.erledigt ? 'done' : ''}${disabledClass}"${bgAttr}${clickAttr}>
+      <div class="card-head">
+        <span class="ort">${escapeHtml(t.arbeitsort || '—')}</span>
+        <span class="anlage">${escapeHtml(t.anlage || '')}${t.anlagenteil ? ' · ' + escapeHtml(t.anlagenteil) : ''}</span>
+      </div>
+      <div class="card-side">
+        <span class="tag tag-${escapeHtml(t.prioritaet || '')}">${escapeHtml(t.prioritaet || '—')}</span>
+        ${t.bild ? `<button type="button" class="img-btn" onclick="event.stopPropagation(); openImageViewer('${t.id}')">📷 Bild</button>` : ''}
+      </div>
+      <div class="card-desc">${escapeHtml(t.beschreibung || '')}</div>
+      <div class="card-meta">
+        <span class="mono">${t.erledigt ? 'erledigt am ' + (t.erledigtAm || '—') : 'erstellt am ' + (t.erstellungsdatum || '—')}</span>
+        <span>Ersteller: ${escapeHtml(t.ersteller || '—')}</span>
+        <span>Status: ${escapeHtml(t.status || '—')}</span>
+        <span>Ausführender: ${escapeHtml(t.ausfuehrender || '—')}</span>
+        ${t.geaendertVon ? `<span>Geändert von: ${escapeHtml(t.geaendertVon)}</span>` : ''}
+      </div>
+    </div>
+  `;
+  }).join('');
+}
+
+function setSelectValuePreserving(id, value) {
+  if (!value) return;
+  const sel = document.getElementById(id);
+  if (sel.value === value) return;
+  const opt = document.createElement('option');
+  opt.value = value;
+  opt.textContent = value;
+  sel.appendChild(opt);
+  sel.value = value;
+}
+
+/* ---------- Auftrag-Modal ---------- */
+function openTaskModal(id) {
+  if (!id && !document.getElementById('benutzer').value) {
+    showToast('Bitte zuerst oben einen Benutzernamen wählen, bevor du einen neuen Auftrag anlegst.', 'error');
+    return;
+  }
+
+  editingTaskId = id || null;
+  const task = id ? tasks.find(t => t.id === id) : null;
+  editingIsDone = !!(task && task.erledigt);
+
+  document.getElementById('taskModalTitle').textContent = task ? 'Auftrag bearbeiten' : 'Neuer Auftrag';
+  document.getElementById('taskModalMeta').textContent = task
+    ? `Erstellt am ${task.erstellungsdatum || '—'} von ${task.ersteller || '—'}` + (task.geaendertVon ? ` · zuletzt geändert von ${task.geaendertVon}` : '')
+    : '';
+
+  fillSelectWithBlank('f_arbeitsort', vorgaben.arbeitsort || [], '— bitte wählen —');
+  document.getElementById('f_arbeitsort').value = task?.arbeitsort || '';
+  if (task) setSelectValuePreserving('f_arbeitsort', task.arbeitsort);
+
+  const ort = document.getElementById('f_arbeitsort').value;
+  fillSelectWithBlank('f_anlage', ort ? ((vorgaben.anlage && vorgaben.anlage[ort]) || []) : [], '— bitte wählen —');
+  document.getElementById('f_anlage').value = task?.anlage || '';
+  if (task) setSelectValuePreserving('f_anlage', task.anlage);
+
+  const anlage = document.getElementById('f_anlage').value;
+  fillSelectWithBlank('f_anlagenteil', anlage ? ((vorgaben.anlagenteil && vorgaben.anlagenteil[anlage]) || []) : [], '— bitte wählen —');
+  document.getElementById('f_anlagenteil').value = task?.anlagenteil || '';
+  if (task) setSelectValuePreserving('f_anlagenteil', task.anlagenteil);
+
+  fillSelectWithBlank('f_status', vorgaben.status || [], '— bitte wählen —');
+  document.getElementById('f_status').value = task?.status || '';
+  if (task) setSelectValuePreserving('f_status', task.status);
+
+  fillSelectWithBlank('f_ausfuehrender', vorgaben.ausfuehrender || [], '— bitte wählen —');
+  document.getElementById('f_ausfuehrender').value = task?.ausfuehrender || '';
+  if (task) setSelectValuePreserving('f_ausfuehrender', task.ausfuehrender);
+
+  document.getElementById('f_prioritaet').value = task?.prioritaet || 'Niedrig';
+  document.getElementById('f_beschreibung').value = task?.beschreibung || '';
+
+  currentTaskImage = task?.bild || null;
+  document.getElementById('f_bild_input').value = '';
+  if (currentTaskImage) {
+    showImagePreview(currentTaskImage);
+  } else {
+    document.getElementById('bildPreviewWrap').style.display = 'none';
+    document.getElementById('bildPreview').src = '';
+  }
+
+  document.getElementById('deleteTaskBtn').style.display = task ? 'inline-block' : 'none';
+  document.getElementById('restoreTaskBtn').style.display = editingIsDone ? 'inline-block' : 'none';
+  document.getElementById('doneTaskBtn').style.display = editingIsDone ? 'none' : 'inline-block';
+
+  document.getElementById('taskOverlay').classList.add('open');
+}
+
+/* ---------- Bild (als komprimiertes Base64 direkt in Firestore) ---------- */
+let currentTaskImage = null;
+const IMAGE_MAX_DIMENSION = 1024;
+const IMAGE_MAX_BYTES = 700000; // ~700 KB, damit das Firestore-Dokument insgesamt klar unter 1 MB bleibt
+
+function onImageFileSelected(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  if (!file.type.startsWith('image/')) {
+    showToast('Bitte eine Bilddatei auswählen.', 'error');
+    event.target.value = '';
+    return;
+  }
+  const reader = new FileReader();
+  reader.onload = e => {
+    const img = new Image();
+    img.onload = () => {
+      let { width, height } = img;
+      if (width > IMAGE_MAX_DIMENSION || height > IMAGE_MAX_DIMENSION) {
+        if (width > height) { height = Math.round(height * IMAGE_MAX_DIMENSION / width); width = IMAGE_MAX_DIMENSION; }
+        else { width = Math.round(width * IMAGE_MAX_DIMENSION / height); height = IMAGE_MAX_DIMENSION; }
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      canvas.getContext('2d').drawImage(img, 0, 0, width, height);
+
+      let quality = 0.8;
+      let dataUrl = canvas.toDataURL('image/jpeg', quality);
+      while (dataUrl.length > IMAGE_MAX_BYTES && quality > 0.3) {
+        quality -= 0.1;
+        dataUrl = canvas.toDataURL('image/jpeg', quality);
+      }
+      if (dataUrl.length > IMAGE_MAX_BYTES * 1.3) {
+        showToast('Bild ist auch komprimiert noch zu groß — bitte ein kleineres Foto wählen.', 'error');
+        event.target.value = '';
+        return;
+      }
+      currentTaskImage = dataUrl;
+      showImagePreview(dataUrl);
+    };
+    img.onerror = () => showToast('Bild konnte nicht gelesen werden.', 'error');
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+function showImagePreview(dataUrl) {
+  document.getElementById('bildPreview').src = dataUrl;
+  document.getElementById('bildPreviewWrap').style.display = 'block';
+}
+
+function removeImage() {
+  currentTaskImage = null;
+  document.getElementById('f_bild_input').value = '';
+  document.getElementById('bildPreviewWrap').style.display = 'none';
+  document.getElementById('bildPreview').src = '';
+}
+
+function openImageViewer(taskId) {
+  const t = tasks.find(x => x.id === taskId);
+  if (!t || !t.bild) return;
+  document.getElementById('imageViewerImg').src = t.bild;
+  document.getElementById('imageViewerOverlay').classList.add('open');
+}
+function closeImageViewer() {
+  document.getElementById('imageViewerOverlay').classList.remove('open');
+  document.getElementById('imageViewerImg').src = '';
+}
+function closeTaskModal() {
+  document.getElementById('taskOverlay').classList.remove('open');
+  editingTaskId = null;
+}
+
+function collectTaskFromForm() {
+  return {
+    arbeitsort: document.getElementById('f_arbeitsort').value,
+    anlage: document.getElementById('f_anlage').value,
+    anlagenteil: document.getElementById('f_anlagenteil').value,
+    prioritaet: document.getElementById('f_prioritaet').value,
+    status: document.getElementById('f_status').value,
+    ausfuehrender: document.getElementById('f_ausfuehrender').value,
+    beschreibung: document.getElementById('f_beschreibung').value.trim(),
+    bild: currentTaskImage || null
+  };
+}
+
+function todayStr() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function ensureStatusExists(name) {
+  if (!vorgaben.status) vorgaben.status = [];
+  if (!vorgaben.status.includes(name)) {
+    vorgaben.status.push(name);
+    saveVorgaben();
+  }
+}
+
+function saveTask() {
+  if (!db) { showToast('Keine Firebase-Verbindung konfiguriert — siehe Hinweis oben.', 'error'); return; }
+  const benutzer = requireBenutzer();
+  if (!benutzer) return;
+  const data = collectTaskFromForm();
+  if (editingTaskId) {
+    data.geaendertVon = benutzer;
+    db.collection('auftraege').doc(editingTaskId).update(data)
+      .then(() => showToast('Auftrag gespeichert.', 'success'))
+      .catch(err => showToast('Speichern fehlgeschlagen: ' + err.message, 'error'));
+  } else {
+    data.ersteller = benutzer;
+    data.erstellungsdatum = todayStr();
+    data.erledigt = false;
+    data.createdAt = firebase.firestore.FieldValue.serverTimestamp();
+    db.collection('auftraege').add(data)
+      .then(() => showToast('Auftrag angelegt.', 'success'))
+      .catch(err => showToast('Anlegen fehlgeschlagen: ' + err.message, 'error'));
+  }
+  closeTaskModal();
+}
+
+function markDone() {
+  if (!db || !editingTaskId) { showToast('Speichere den Auftrag zuerst, bevor du ihn abschließt.', 'error'); return; }
+  const benutzer = requireBenutzer();
+  if (!benutzer) return;
+  ensureStatusExists('Erledigt');
+  db.collection('auftraege').doc(editingTaskId).update({
+    ...collectTaskFromForm(),
+    erledigt: true,
+    erledigtAm: todayStr(),
+    geaendertVon: benutzer,
+    status: 'Erledigt'
+  })
+    .then(() => showToast('Auftrag als erledigt markiert.', 'success'))
+    .catch(err => showToast('Fehlgeschlagen: ' + err.message, 'error'));
+  closeTaskModal();
+}
+
+function restoreCurrentTask() {
+  if (!db || !editingTaskId) return;
+  const benutzer = requireBenutzer();
+  if (!benutzer) return;
+  ensureStatusExists('Offen');
+  db.collection('auftraege').doc(editingTaskId).update({
+    erledigt: false,
+    erledigtAm: firebase.firestore.FieldValue.delete(),
+    geaendertVon: benutzer,
+    status: 'Offen'
+  })
+    .then(() => showToast('Auftrag wiederhergestellt.', 'success'))
+    .catch(err => showToast('Fehlgeschlagen: ' + err.message, 'error'));
+  closeTaskModal();
+}
+
+function deleteCurrentTask() {
+  if (!db || !editingTaskId) return;
+  const benutzer = requireBenutzer();
+  if (!benutzer) return;
+
+  if (retentionDeleted && retentionDeleted.modus === 'sofort') {
+    if (!confirm('Aufbewahrung steht auf „sofort" — diesen Auftrag direkt endgültig und unwiderruflich löschen?')) return;
+    db.collection('auftraege').doc(editingTaskId).delete()
+      .then(() => showToast('Auftrag endgültig gelöscht.', 'success'))
+      .catch(err => showToast('Fehlgeschlagen: ' + err.message, 'error'));
+    closeTaskModal();
+    return;
+  }
+
+  if (!confirm('Diesen Auftrag in den Bereich „Gelöscht" verschieben?')) return;
+  db.collection('auftraege').doc(editingTaskId).update({
+    geloescht: true,
+    geloeschtAm: firebase.firestore.FieldValue.serverTimestamp(),
+    geaendertVon: benutzer
+  })
+    .then(() => showToast('Auftrag nach „Gelöscht" verschoben.', 'success'))
+    .catch(err => showToast('Fehlgeschlagen: ' + err.message, 'error'));
+  closeTaskModal();
+}
+
+/* ---------- Gelöscht & automatische Aufräum-Regeln ---------- */
+let retentionDeleted = null;   // { modus: 'nie'|'sofort'|'tage', tage: number }
+let retentionErledigt = null;  // { modus: 'nie'|'sofort'|'tage', tage: number }
+let inactivityMinutes = 0;
+let inactivityTimer = null;
+let tasksLoaded = false;
+let cleanupDone = false;
+
+function daysFromSetting(setting) {
+  if (!setting || setting.modus === 'nie') return null;
+  if (setting.modus === 'sofort') return 0;
+  if (setting.modus === 'tage') {
+    const n = Number(setting.tage);
+    return n > 0 ? n : null;
+  }
+  return null;
+}
+
+function formatTimestamp(ts) {
+  const ms = tsMillis(ts);
+  if (!ms) return '—';
+  return new Date(ms).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+
+function updateDeletedButtonVisibility() {
+  const btn = document.getElementById('deletedBtn');
+  if (btn) btn.style.display = unlocked ? 'inline-block' : 'none';
+  const row = document.getElementById('adminSettingsRow');
+  if (row) row.style.display = unlocked ? 'flex' : 'none';
+  const lockBtn = document.getElementById('lockToggleBtn');
+  if (lockBtn) lockBtn.textContent = unlocked ? '🔓 Sperren' : '🔒 Entsperren';
+}
+
+function onLockToggleClick() {
+  if (unlocked) {
+    lockAgain();
+  } else {
+    openUnlockModal();
+  }
+}
+
+function updateRetentionModusUI(modusId, tageId, setting) {
+  const modusSel = document.getElementById(modusId);
+  const tageInput = document.getElementById(tageId);
+  if (!modusSel || !tageInput) return;
+  const modus = (setting && setting.modus) || 'nie';
+  modusSel.value = modus;
+  tageInput.style.display = modus === 'tage' ? 'inline-block' : 'none';
+  if (setting && setting.tage) tageInput.value = setting.tage;
+}
+
+function openDeletedModal() {
+  if (!unlocked) return;
+  updateRetentionModusUI('retentionModus', 'retentionTage', retentionDeleted);
+  document.getElementById('selectAllDeleted').checked = false;
+  renderDeletedList();
+  document.getElementById('deletedOverlay').classList.add('open');
+}
+function closeDeletedModal() {
+  document.getElementById('deletedOverlay').classList.remove('open');
+}
+
+function renderDeletedList() {
+  const container = document.getElementById('deletedList');
+  if (!container) return;
+  const deleted = tasks.filter(t => t.geloescht).sort((a, b) => tsMillis(b.geloeschtAm) - tsMillis(a.geloeschtAm));
+  if (deleted.length === 0) {
+    container.innerHTML = '<div class="empty">Keine gelöschten Aufträge.</div>';
+    return;
+  }
+  container.innerHTML = deleted.map(t => `
+    <div class="deleted-item">
+      <input type="checkbox" class="deleted-check" data-id="${t.id}">
+      <div class="deleted-item-info">
+        <div class="deleted-item-title">${escapeHtml(t.arbeitsort || '—')}${t.anlage ? ' · ' + escapeHtml(t.anlage) : ''}</div>
+        <div class="mono deleted-item-meta">gelöscht am ${formatTimestamp(t.geloeschtAm)}${t.geaendertVon ? ' von ' + escapeHtml(t.geaendertVon) : ''}</div>
+        <div class="deleted-item-desc">${escapeHtml(t.beschreibung || '')}</div>
+      </div>
+      <div class="deleted-item-actions">
+        <button class="btn" onclick="restoreDeletedOne('${t.id}')">Wiederherstellen</button>
+        <button class="btn" onclick="doneDeletedOne('${t.id}')">In Erledigt</button>
+        <button class="btn btn-danger" onclick="purgeDeletedOne('${t.id}')">Löschen</button>
+      </div>
+    </div>
+  `).join('');
+}
+
+function toggleSelectAllDeleted() {
+  const checked = document.getElementById('selectAllDeleted').checked;
+  document.querySelectorAll('.deleted-check').forEach(el => el.checked = checked);
+}
+function getSelectedDeletedIds() {
+  return Array.from(document.querySelectorAll('.deleted-check:checked')).map(el => el.dataset.id);
+}
+
+function bulkActionIds(ids, action) {
+  if (!db) return;
+  if (ids.length === 0) { showToast('Keine Einträge ausgewählt.', 'error'); return; }
+  if (action === 'purge' && !confirm(`${ids.length} Auftrag/Aufträge endgültig und unwiderruflich löschen?`)) return;
+
+  let benutzer = null;
+  if (action !== 'purge') {
+    benutzer = requireBenutzer();
+    if (!benutzer) return;
+  }
+  if (action === 'done') ensureStatusExists('Erledigt');
+
+  const batch = db.batch();
+  ids.forEach(id => {
+    const ref = db.collection('auftraege').doc(id);
+    if (action === 'restore') {
+      batch.update(ref, { geloescht: false, geaendertVon: benutzer });
+    } else if (action === 'done') {
+      batch.update(ref, { geloescht: false, erledigt: true, erledigtAm: todayStr(), status: 'Erledigt', geaendertVon: benutzer });
+    } else if (action === 'purge') {
+      batch.delete(ref);
+    }
+  });
+  batch.commit()
+    .then(() => showToast(`${ids.length} Auftrag/Aufträge ${action === 'purge' ? 'endgültig gelöscht' : (action === 'restore' ? 'wiederhergestellt' : 'in „Erledigt" verschoben')}.`, 'success'))
+    .catch(err => showToast('Fehlgeschlagen: ' + err.message, 'error'));
+}
+
+function bulkAction(scope, action) {
+  const ids = scope === 'selected' ? getSelectedDeletedIds() : tasks.filter(t => t.geloescht).map(t => t.id);
+  bulkActionIds(ids, action);
+}
+
+function restoreDeletedOne(id) { bulkActionIds([id], 'restore'); }
+function doneDeletedOne(id) { bulkActionIds([id], 'done'); }
+function purgeDeletedOne(id) { bulkActionIds([id], 'purge'); }
+
+function onRetentionChange() {
+  if (!unlocked || !db) return;
+  const modus = document.getElementById('retentionModus').value;
+  const tage = Math.max(1, parseInt(document.getElementById('retentionTage').value, 10) || 1);
+  document.getElementById('retentionTage').style.display = modus === 'tage' ? 'inline-block' : 'none';
+  retentionDeleted = { modus, tage };
+  db.collection('meta').doc('aufbewahrung').set(retentionDeleted)
+    .then(() => showToast('Aufbewahrungsfrist gespeichert.', 'success'))
+    .catch(err => showToast('Fehlgeschlagen: ' + err.message, 'error'));
+}
+
+function onErledigtRetentionChange() {
+  if (!unlocked || !db) return;
+  const modus = document.getElementById('erledigtRetentionModus').value;
+  const tage = Math.max(1, parseInt(document.getElementById('erledigtRetentionTage').value, 10) || 1);
+  document.getElementById('erledigtRetentionTage').style.display = modus === 'tage' ? 'inline-block' : 'none';
+  retentionErledigt = { modus, tage };
+  db.collection('meta').doc('aufbewahrungErledigt').set(retentionErledigt)
+    .then(() => showToast('Aufräum-Regel für „Erledigt" gespeichert.', 'success'))
+    .catch(err => showToast('Fehlgeschlagen: ' + err.message, 'error'));
+}
+
+function maybeRunCleanup() {
+  if (cleanupDone) return;
+  if (!appUnlocked) return;
+  if (retentionDeleted === null || retentionErledigt === null) return;
+  if (!tasksLoaded) return;
+  cleanupDone = true;
+  cleanupOldDeletedTasks();
+  cleanupOldErledigtTasks();
+}
+
+function cleanupOldDeletedTasks() {
+  const days = daysFromSetting(retentionDeleted);
+  if (days === null || !db) return;
+  const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
+  const toPurge = tasks.filter(t => t.geloescht && tsMillis(t.geloeschtAm) && tsMillis(t.geloeschtAm) <= cutoff);
+  if (toPurge.length === 0) return;
+  const batch = db.batch();
+  toPurge.forEach(t => batch.delete(db.collection('auftraege').doc(t.id)));
+  batch.commit()
+    .then(() => showToast(`${toPurge.length} alte gelöschte Aufträge automatisch endgültig entfernt.`, 'success'))
+    .catch(err => showToast('Automatische Säuberung fehlgeschlagen: ' + err.message, 'error'));
+}
+
+function cleanupOldErledigtTasks() {
+  const days = daysFromSetting(retentionErledigt);
+  if (days === null || !db) return;
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - days);
+  const cutoffStr = cutoff.toISOString().slice(0, 10);
+  const toMove = tasks.filter(t => t.erledigt && !t.geloescht && t.erledigtAm && t.erledigtAm <= cutoffStr);
+  if (toMove.length === 0) return;
+  const batch = db.batch();
+  toMove.forEach(t => batch.update(db.collection('auftraege').doc(t.id), {
+    geloescht: true,
+    geloeschtAm: firebase.firestore.FieldValue.serverTimestamp()
+  }));
+  batch.commit()
+    .then(() => showToast(`${toMove.length} alte erledigte Aufträge automatisch nach „Gelöscht" verschoben.`, 'success'))
+    .catch(err => showToast('Automatisches Aufräumen fehlgeschlagen: ' + err.message, 'error'));
+}
+
+/* ---------- Automatische Benutzer-Rücksetzung bei Inaktivität ---------- */
+function onInactivityChange() {
+  if (!unlocked || !db) return;
+  const val = Math.max(0, parseInt(document.getElementById('inactivityMinutes').value, 10) || 0);
+  inactivityMinutes = val;
+  db.collection('meta').doc('inaktivitaet').set({ minuten: val })
+    .then(() => { showToast('Einstellung gespeichert.', 'success'); resetInactivityTimer(); })
+    .catch(err => showToast('Fehlgeschlagen: ' + err.message, 'error'));
+}
+
+function resetInactivityTimer() {
+  if (inactivityTimer) { clearTimeout(inactivityTimer); inactivityTimer = null; }
+  if (!appUnlocked || !inactivityMinutes || inactivityMinutes <= 0) return;
+  inactivityTimer = setTimeout(() => {
+    const sel = document.getElementById('benutzer');
+    if (sel && sel.value) {
+      sel.value = '';
+      render();
+      showToast('Benutzer wegen Inaktivität zurückgesetzt.', 'success');
+    }
+  }, inactivityMinutes * 60 * 1000);
+}
+
+['click', 'keydown', 'touchstart'].forEach(evt => {
+  document.addEventListener(evt, () => resetInactivityTimer(), { passive: true });
+});
+
+/* ---------- Vorgaben-Modal ---------- */
+// Eigenständige Listen (nicht abhängig von einer anderen Liste)
+const VG_FLAT_LABELS = {
+  arbeitsort: 'Arbeitsorte',
+  status: 'Status',
+  ausfuehrender: 'Ausführende',
+  benutzername: 'Benutzername'
+};
+
+function openVorgabenModal() {
+  renderVorgabenModal();
+  document.getElementById('vgOverlay').classList.add('open');
+}
+function closeVorgabenModal() {
+  document.getElementById('vgOverlay').classList.remove('open');
+  editingVg = null;
+  // Abhängige Auswahlfelder im Auftrags-Formular könnten sich geändert haben
+  populateVorgabenSelects();
+}
+
+let editingVg = null; // { cat, parent, index }
+
+function getArray(cat, parent) {
+  if (parent === undefined) {
+    if (!vorgaben[cat]) vorgaben[cat] = [];
+    return vorgaben[cat];
+  }
+  if (!vorgaben[cat]) vorgaben[cat] = {};
+  if (!vorgaben[cat][parent]) vorgaben[cat][parent] = [];
+  return vorgaben[cat][parent];
+}
+
+function chipsHtml(cat, parent, label) {
+  const arr = getArray(cat, parent);
+  const groupKey = parent === undefined ? cat : `${cat}::${parent}`;
+  const editable = unlocked;
+  const chips = arr.map((v, i) => {
+    if (editable && editingVg && editingVg.cat === cat && editingVg.parent === parent && editingVg.index === i) {
+      return `
+        <span class="vg-chip editing">
+          <input type="text" id="vgedit_${groupKey}_${i}" value="${escapeAttr(v)}"
+            onkeydown="if(event.key==='Enter')saveEditVorgabe('${cat}',${i},${parent === undefined ? 'undefined' : `'${escapeAttr(parent)}'`});if(event.key==='Escape')cancelEditVorgabe();">
+          <button onclick="saveEditVorgabe('${cat}',${i},${parent === undefined ? 'undefined' : `'${escapeAttr(parent)}'`})" title="Speichern">✓</button>
+          <button onclick="cancelEditVorgabe()" title="Abbrechen">✕</button>
+        </span>`;
+    }
+    const colorVal = (vorgaben.statusFarben && vorgaben.statusFarben[v]) || '#2c3238';
+    if (!editable) {
+      const dot = cat === 'status' ? `<span class="vg-color-dot" style="background:${escapeAttr(colorVal)}" title="Hintergrundfarbe"></span>` : '';
+      return `<span class="vg-chip">${dot}${escapeHtml(v)}</span>`;
+    }
+    const parentArg = parent === undefined ? 'undefined' : `'${escapeAttr(parent)}'`;
+    const colorInput = cat === 'status'
+      ? `<input type="color" class="vg-color-input" value="${escapeAttr(colorVal)}" title="Hintergrundfarbe für diesen Status" onchange="setStatusColor('${escapeAttr(v)}', this.value)">`
+      : '';
+    return `
+      <span class="vg-chip">
+        <button class="edit-btn" onclick="moveVorgabe('${cat}',${parentArg},${i},-1)" title="Nach oben verschieben" ${i === 0 ? 'disabled' : ''}>▲</button>
+        <button class="edit-btn" onclick="moveVorgabe('${cat}',${parentArg},${i},1)" title="Nach unten verschieben" ${i === arr.length - 1 ? 'disabled' : ''}>▼</button>
+        ${colorInput}
+        ${escapeHtml(v)}
+        <button class="edit-btn" onclick="startEditVorgabe('${cat}',${i},${parentArg})" title="Bearbeiten">✎</button>
+        <button onclick="removeVorgabe('${cat}','${escapeAttr(v)}',${parentArg})" title="Löschen">✕</button>
+      </span>`;
+  }).join('') || '<span style="color:var(--muted);font-size:12px">noch keine Einträge</span>';
+
+  if (!editable) {
+    return `<div class="vg-chips">${chips}</div>`;
+  }
+
+  return `
+    <div class="vg-chips">${chips}</div>
+    <div class="vg-add">
+      <input type="text" id="vgnew_${groupKey}" placeholder="Neuer Eintrag …"
+        onkeydown="if(event.key==='Enter')addVorgabe('${cat}',${parent === undefined ? 'undefined' : `'${escapeAttr(parent)}'`})">
+      <button class="btn" onclick="addVorgabe('${cat}',${parent === undefined ? 'undefined' : `'${escapeAttr(parent)}'`})">Hinzufügen</button>
+    </div>`;
+}
+
+function renderVorgabenModal() {
+  if (!vorgaben) return;
+  const el = document.getElementById('vgCategories');
+  let html = '';
+
+  if (!unlocked) {
+    html += `<div class="vg-locked-hint">🔒 Gesperrt — zum Bearbeiten oben rechts im Hauptfenster entsperren</div>`;
+  } else {
+    html += `<div class="vg-locked-hint unlocked-hint">🔓 Entsperrt</div>`;
+  }
+
+  // Arbeitsorte
+  html += `<div class="vg-cat"><h3>${VG_FLAT_LABELS.arbeitsort}</h3>${chipsHtml('arbeitsort', undefined)}</div>`;
+
+  // Anlagen — abhängig vom Arbeitsort
+  html += `<div class="vg-cat vg-cat-dependent"><h3>Anlagen <span class="vg-dep">je Arbeitsort</span></h3>`;
+  const orte = vorgaben.arbeitsort || [];
+  if (orte.length === 0) {
+    html += `<div class="vg-empty-hint">Zuerst mindestens einen Arbeitsort anlegen.</div>`;
+  } else {
+    html += orte.map(ort => `
+      <div class="vg-subgroup">
+        <div class="vg-subgroup-title">${escapeHtml(ort)}</div>
+        ${chipsHtml('anlage', ort)}
+      </div>
+    `).join('');
+  }
+  html += `</div>`;
+
+  // Anlagenteile — abhängig von der Anlage
+  html += `<div class="vg-cat vg-cat-dependent"><h3>Anlagenteile <span class="vg-dep">je Anlage</span></h3>`;
+  const alleAnlagen = Array.from(new Set(Object.values(vorgaben.anlage || {}).flat()));
+  if (alleAnlagen.length === 0) {
+    html += `<div class="vg-empty-hint">Zuerst mindestens eine Anlage anlegen.</div>`;
+  } else {
+    html += alleAnlagen.map(anlage => `
+      <div class="vg-subgroup">
+        <div class="vg-subgroup-title">${escapeHtml(anlage)}</div>
+        ${chipsHtml('anlagenteil', anlage)}
+      </div>
+    `).join('');
+  }
+  html += `</div>`;
+
+  // Status, Ausführende, Benutzername (eigenständig)
+  ['status', 'ausfuehrender', 'benutzername'].forEach(cat => {
+    html += `<div class="vg-cat"><h3>${VG_FLAT_LABELS[cat]}</h3>${chipsHtml(cat, undefined)}</div>`;
+  });
+
+  if (unlocked) {
+    html += `
+      <div class="vg-backup-row">
+        <button class="btn" onclick="backupVorgaben()">📦 Backup</button>
+        <button class="btn" onclick="restoreVorgabenBackup()">♻️ Restore</button>
+      </div>`;
+  }
+
+  el.innerHTML = html;
+
+  if (editingVg) {
+    const groupKey = editingVg.parent === undefined ? editingVg.cat : `${editingVg.cat}::${editingVg.parent}`;
+    const inp = document.getElementById(`vgedit_${groupKey}_${editingVg.index}`);
+    if (inp) { inp.focus(); inp.select(); }
+  }
+}
+
+function startEditVorgabe(cat, index, parent) {
+  if (!unlocked) return;
+  editingVg = { cat, parent, index };
+  renderVorgabenModal();
+}
+function cancelEditVorgabe() {
+  editingVg = null;
+  renderVorgabenModal();
+}
+function saveEditVorgabe(cat, index, parent) {
+  if (!unlocked) return;
+  const groupKey = parent === undefined ? cat : `${cat}::${parent}`;
+  const input = document.getElementById(`vgedit_${groupKey}_${index}`);
+  const arr = getArray(cat, parent);
+  const newVal = input.value.trim();
+  const oldVal = arr[index];
+  if (!newVal) { cancelEditVorgabe(); return; }
+  if (newVal !== oldVal) {
+    if (arr.includes(newVal)) { alert('Dieser Eintrag existiert bereits.'); return; }
+    arr[index] = newVal;
+
+    // Abhängige Unterlisten mit umbenennen
+    if (cat === 'arbeitsort' && vorgaben.anlage && vorgaben.anlage[oldVal] !== undefined) {
+      vorgaben.anlage[newVal] = vorgaben.anlage[oldVal];
+      delete vorgaben.anlage[oldVal];
+    }
+    if (cat === 'anlage' && vorgaben.anlagenteil && vorgaben.anlagenteil[oldVal] !== undefined) {
+      vorgaben.anlagenteil[newVal] = vorgaben.anlagenteil[oldVal];
+      delete vorgaben.anlagenteil[oldVal];
+    }
+    if (cat === 'status' && vorgaben.statusFarben && vorgaben.statusFarben[oldVal] !== undefined) {
+      vorgaben.statusFarben[newVal] = vorgaben.statusFarben[oldVal];
+      delete vorgaben.statusFarben[oldVal];
+    }
+    saveVorgaben();
+  }
+  editingVg = null;
+  renderVorgabenModal();
+}
+
+function moveVorgabe(cat, parent, index, direction) {
+  if (!unlocked) return;
+  const arr = getArray(cat, parent);
+  const newIndex = index + direction;
+  if (newIndex < 0 || newIndex >= arr.length) return;
+  [arr[index], arr[newIndex]] = [arr[newIndex], arr[index]];
+  renderVorgabenModal();
+  saveVorgaben();
+}
+
+function addVorgabe(cat, parent) {
+  if (!unlocked) return;
+  const groupKey = parent === undefined ? cat : `${cat}::${parent}`;
+  const input = document.getElementById('vgnew_' + groupKey);
+  const val = input.value.trim();
+  if (!val) return;
+  const arr = getArray(cat, parent);
+  if (arr.includes(val)) { input.value = ''; return; }
+  arr.push(val);
+  input.value = '';
+  saveVorgaben();
+}
+
+function removeVorgabe(cat, val, parent) {
+  if (!unlocked) return;
+  const arr = getArray(cat, parent);
+  const idx = arr.indexOf(val);
+  if (idx > -1) arr.splice(idx, 1);
+
+  // Abhängige Unterlisten mit entfernen
+  if (cat === 'arbeitsort' && vorgaben.anlage) {
+    const removedAnlagen = vorgaben.anlage[val] || [];
+    delete vorgaben.anlage[val];
+    removedAnlagen.forEach(a => { if (vorgaben.anlagenteil) delete vorgaben.anlagenteil[a]; });
+  }
+  if (cat === 'anlage' && vorgaben.anlagenteil) {
+    delete vorgaben.anlagenteil[val];
+  }
+  if (cat === 'status' && vorgaben.statusFarben) {
+    delete vorgaben.statusFarben[val];
+  }
+  saveVorgaben();
+}
+
+function setStatusColor(status, colorHex) {
+  if (!unlocked) return;
+  if (!vorgaben.statusFarben) vorgaben.statusFarben = {};
+  vorgaben.statusFarben[status] = colorHex;
+  saveVorgaben();
+  render();
+}
+
+/* ---------- Backup / Restore der Listenvorgaben ---------- */
+function backupVorgaben() {
+  if (!unlocked || !db) return;
+  const snapshot = JSON.parse(JSON.stringify(vorgaben));
+  snapshot._gesichertAm = new Date().toISOString();
+  db.collection('meta').doc('vorgabenBackup').set(snapshot)
+    .then(() => showToast('Sicherung der Listenvorgaben erstellt.', 'success'))
+    .catch(err => showToast('Sicherung fehlgeschlagen: ' + err.message, 'error'));
+}
+
+function restoreVorgabenBackup() {
+  if (!unlocked || !db) return;
+  if (!confirm('Aktuelle Listenvorgaben durch die letzte Sicherung ersetzen? Das kann nicht rückgängig gemacht werden.')) return;
+  db.collection('meta').doc('vorgabenBackup').get().then(snap => {
+    if (!snap.exists) { showToast('Keine Sicherung vorhanden — zuerst „Backup" ausführen.', 'error'); return; }
+    const data = snap.data();
+    delete data._gesichertAm;
+    return db.collection('meta').doc('vorgaben').set(data);
+  })
+    .then(() => showToast('Listenvorgaben wiederhergestellt.', 'success'))
+    .catch(err => showToast('Wiederherstellen fehlgeschlagen: ' + err.message, 'error'));
+}
+
+function saveVorgaben() {
+  if (!db) { renderVorgabenModal(); populateVorgabenSelects(); return; }
+  db.collection('meta').doc('vorgaben').set(vorgaben)
+    .catch(err => showToast('Listenvorgabe konnte nicht gespeichert werden: ' + err.message, 'error'));
+}
+
+/* ---------- Utils ---------- */
+function escapeHtml(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+function escapeAttr(s) { return escapeHtml(s).replace(/'/g, '&#39;'); }
+
+document.getElementById('taskOverlay').addEventListener('click', e => { if (e.target.id === 'taskOverlay') closeTaskModal(); });
+document.getElementById('vgOverlay').addEventListener('click', e => { if (e.target.id === 'vgOverlay') closeVorgabenModal(); });
+document.getElementById('unlockOverlay').addEventListener('click', e => { if (e.target.id === 'unlockOverlay') closeUnlockModal(); });
+document.getElementById('infoOverlay').addEventListener('click', e => { if (e.target.id === 'infoOverlay') closeInfoModal(); });
+document.getElementById('deletedOverlay').addEventListener('click', e => { if (e.target.id === 'deletedOverlay') closeDeletedModal(); });
+document.getElementById('imageViewerOverlay').addEventListener('click', e => { if (e.target.id === 'imageViewerOverlay') closeImageViewer(); });
+
+document.getElementById('appVersionBox').textContent = APP_VERSION;
+
+try {
+  initFirebase();
+} catch (err) {
+  document.getElementById('appGate').style.display = 'flex';
+  document.getElementById('gateHint').style.color = 'var(--rust)';
+  document.getElementById('gateHint').textContent = 'Unerwarteter Fehler beim Start: ' + err.message;
+  document.getElementById('gatePassword').style.display = 'none';
+  document.querySelector('#appGate .app-gate-box button').style.display = 'none';
+}
+</script>
+</body>
+</html>
